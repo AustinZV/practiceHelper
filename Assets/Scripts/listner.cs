@@ -6,39 +6,112 @@ using System.Windows.Input;
 public class listner : MonoBehaviour
 {
 	public part[] parts;
+	public GameObject backgroundPrefab;
+	public GameObject numberPrefab;
+	public bool paused;
+
 	ChuckSubInstance myChuck;
 	GameObject TheGameController;
+
+	private bool started;
+	private int counter;
+
 	//MainScript TheScript;
 	// Start is called before the first frame update
 	void Start()
     {
 		TheGameController = GameObject.Find("Button");
 		myChuck = GetComponent<ChuckSubInstance>();
+		counter = 1;
+		paused = false;
+		started = false;
 	}
+	
 
 	// Update is called once per frame
 	void Update()
 	{
-		if (Input.GetKeyDown(KeyCode.A))
-		{
-			Debug.Log("playing");
-			playFile();
-		}
-		if (Input.GetKeyDown("space"))
-		{
-			myChuck.BroadcastEvent("space");
-		}
-		//Debug.Log("hi");
+        //print(parts);
+        if (parts != null)
+        {
+			//print(parts[0].timesig);
+			if (Input.GetKeyDown(KeyCode.A))
+			{
+				Debug.Log("playing");
+				playFile();
+			}
+			if (Input.GetKeyDown("space") && !paused)
+			{
+                if (counter <= parts[0].timesig)
+                {
+                    setUpNumbers();
+                }
+                GameObject background = Instantiate(backgroundPrefab, backgroundPrefab.transform.position, Quaternion.identity);
+				counter++;
+				if (!started)
+                {
+					started = true;
+					playFile();
+                }
+				else
+                {
+					myChuck.BroadcastEvent("space");
+				}
+				
+			}
+        }
+    }
+
+	//8*((3*1)-1)/((3*4)+1)-(8/2)
+	//8*2/13
+
+	void setUpNumbers()
+    {
+		int SCREEN_WIDTH = 16;
+		float newX = (float)((float)(SCREEN_WIDTH * ((3 * counter) - 1)) / (float)((3 * parts[0].timesig) + 1) - (float)(SCREEN_WIDTH / 2));
+		float newY = numberPrefab.transform.position.y;
+		float newZ = numberPrefab.transform.position.z;
+		GameObject number = Instantiate(numberPrefab, new Vector3(newX, newY, newZ), Quaternion.identity);
+		number.GetComponent<numbers>().nameNum(counter, parts[0].timesig);
+		//for (int i=0; i < parts[0].timesig; i++)
+		//      {
+		//          GameObject number = Instantiate(numberPrefab, numberPrefab.transform.position, Quaternion.identity);
+		//	number.GetComponent<numbers>().placeNum((i + 1), parts[0].timesig);
+		//      }
 	}
+
+	public void stopPlaying()
+    {
+		parts = null;
+		paused = false;
+		started = false;
+		myChuck.SetFloat("stop", 1);
+		myChuck.BroadcastEvent("space");
+	}
+
+	public void restartPlaying()
+    {
+		myChuck.SetFloat("stop", 1);
+		myChuck.BroadcastEvent("space");
+		playFile();
+    }
+
+	//public void pauseAudio()
+ //   {
+	//	paused = true;
+ //   }
 
 	void playFile()
 	{
 		for (int p = 0; p < parts.Length; p++)
+		
 		//for (int p = 1; p < 2; p++)
 		{
 			myChuck.RunCode(string.Format(@"
 
             global Event space;
+			global float stop;
+			0 => stop;
 
 			[""C0"", ""C#0"", ""D0"", ""D#0"", ""E0"", ""F0"", ""F#0"",  ""G0"",  ""G#0"",  ""A0"",  ""A#0"",  ""B0"",
             ""C1"", ""C#1"", ""D1"", ""D#1"", ""E1"", ""F1"", ""F#1"", ""G1"", ""G#1"", ""A1"", ""A#1"", ""B1"",
@@ -57,25 +130,16 @@ public class listner : MonoBehaviour
             [{1}] @=> int durations[];
 			{2} @=> int divisions;
 			{3} @=> float bpm;
-			{4} @=> int p;
+			{4} @=> int timeSig;
             (0.35*bpm/(60.0*divisions)) => float beat;
             
             
             0 => int cont;
-			fun void wait()
+			fun void interrupt()
 			{{
-				0 => int avoidFirst;
-				now => time pastTime;
-				while(true)
-				{{
-					space => now;
 					1 => cont;
-					
-					
-
-				}}
 			}}
-			spork ~ wait();
+			spork ~interrupt();
 
 
 	        SndBuf buf => dac;
@@ -85,9 +149,22 @@ public class listner : MonoBehaviour
 			0 => float remainder;
 			0 => float prev;
 			0 => float timeRem;
+
+			0::second => dur beatLen;
+			now => time lastBeat;
+
+			for (0 => int b; b<timeSig; b++)
+			{{
+				space => now;
+				now-lastBeat => beatLen;
+				now => lastBeat;
+				
+			}}
+
+
             for (0 => int i; i<pitches.cap(); i++) 
             {{
-                
+				
                 if (pitches[i] > 0)
                 {{
                     1 => buf.gain;
@@ -103,63 +180,34 @@ public class listner : MonoBehaviour
 				
 				while (remainder != 0)
 				{{
-				if (cont == 1) {{
-					<<<""yes"">>>;
-				}}
 					0 => timeRem;
 
-					if (p==2) {{ <<<prev+remainder>>>; }}
+
 					if ((prev+remainder) < divisions)
 					{{
-						
-						while ((timeRem+cycTime) > (beat*remainder))
-						{{
-							cycTime::second => now;
-							timeRem+cycTime => timeRem;
-							if (cont == 1)
-							{{
-								break;
-							}}
-							
-						}}
-						if (cont == 0)
-						{{
-							((beat * remainder)-timeRem)::second => now;
-						}}
+						(beatLen * remainder / divisions )=> now;
 						(prev+remainder) => prev;
-
 						0 => remainder;
 					}}
 					else
 					{{
-						while ((timeRem+cycTime) > (beat * (divisions-prev)))
-						{{
-							cycTime::second => now;
-							timeRem+cycTime => timeRem;
-							if (cont == 1)
-							{{
-								break;
-							}}
-						}}
-						if (cont == 0)
-						{{
-							((beat * (divisions-prev))-timeRem)::second => now;
-						}}
-							
+						space => now;
+						now-lastBeat => beatLen;
+						now => lastBeat;
 						remainder - (divisions-prev) => remainder;
 						0 => prev;
-						if (cont == 0)
-						{{
-							space => now;
-						}}
 					}}
 						0 => cont;
-
+					if (stop == 1) {{
+						break;
+						
+					}}
+					
 				}}
-				
-			    
 
-                
+				if (stop == 1) {{
+					break;
+				}}
 		    }}
             
 
@@ -168,7 +216,7 @@ public class listner : MonoBehaviour
 			string.Join(",", parts[p].durations),
 			parts[p].divisions,
 			parts[p].bpm,
-			p));
+			parts[p].timesig));
 			//{0} = pitches, {1} = duration
 			//for (0 => int reps; reps <
 			//<<< currBeat >>>;
@@ -203,6 +251,7 @@ public struct part
 	public int[] durations;
 	public int divisions;
 	public float bpm;
+	public int timesig;
 }
 
 
